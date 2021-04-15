@@ -1,0 +1,730 @@
+Скрипт главного персонажа
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Player : MonoBehaviour
+
+{
+
+    Rigidbody2D rb;//вспомогательная переменная
+    public float speed; 
+    public float jumpHeight;
+    public Transform groundCheck;
+    bool isGrounded;
+    Animator anim; //переменная анимации
+    int curHp;
+    int maxHp=3;
+    bool isHit=false;
+    public Main main; //вспомогательная переменная
+    public bool key = false;
+    bool canTP=true;
+    int coins=0;
+    public SoundEffector soundEffector;
+
+    
+    void Start()
+    {
+        rb = GetComponent<Rigidbody2D>();
+        anim = GetComponent<Animator>();
+        curHp = maxHp;
+    }
+
+    void Update()
+    {
+
+        CheckGround();//проверяет , находится ли персонаж на земле
+        if (Input.GetAxis("Horizontal") == 0 && (isGrounded))
+        {
+            anim.SetInteger("State", 1);
+        }
+        else
+        {
+            Flip();
+            if (isGrounded) anim.SetInteger("State", 2);
+        }
+//условия для анимации
+
+        if (Input.GetKeyDown(KeyCode.Space) && isGrounded)
+        {
+            rb.AddForce(transform.up * jumpHeight, ForceMode2D.Impulse);
+            soundEffector.PlayJumpSound();
+        }//условие прыжка
+
+        if (groundCheck.transform.position.y < -25) { GetComponent<Transform>().position = new Vector3(0,0,0); }
+    }//условие перезапуска уровня при падении
+
+    void FixedUpdate()
+    {
+        rb.velocity = new Vector2(Input.GetAxis("Horizontal") * speed, rb.velocity.y);
+      
+
+    }//скорость персонажа
+
+
+    void Flip()
+    {
+        if (Input.GetAxis("Horizontal") > 0)
+            transform.localRotation = Quaternion.Euler(0, 0, 0);
+
+        if (Input.GetAxis("Horizontal") < 0)
+            transform.localRotation = Quaternion.Euler(0, 180, 0);
+
+    }//разворот персонажа в противоположную сторону
+
+    void CheckGround()
+    {
+        Collider2D[] colliders = Physics2D.OverlapCircleAll(groundCheck.position, 0.2f);
+        isGrounded = colliders.Length > 1;
+
+        if (!isGrounded) anim.SetInteger("State", 3);
+
+    }
+
+    public void RecountHp(int deltaHp) {
+        curHp = curHp + deltaHp;
+        if (deltaHp < 0)
+        {
+            StopCoroutine(OnHit());
+            isHit = true;
+            StartCoroutine(OnHit());
+        }
+        else if (curHp > maxHp) 
+        {
+            curHp = maxHp;
+        
+        }
+        
+        if (curHp <= 0) { 
+            GetComponent<CapsuleCollider2D>().enabled = false;
+            Invoke("Lose", 1.5f);
+        }
+    }//пересчёт жизней персонажа
+
+    IEnumerator OnHit() 
+    {
+        if (isHit)
+            GetComponent<SpriteRenderer>().color = new Color(1f,GetComponent<SpriteRenderer>().color.g-0.04f, GetComponent<SpriteRenderer>().color.b - 0.04f);
+
+        else
+            GetComponent<SpriteRenderer>().color = new Color(1f, GetComponent<SpriteRenderer>().color.g + 0.04f, GetComponent<SpriteRenderer>().color.b + 0.04f);
+
+        if (GetComponent<SpriteRenderer>().color.g == 1f)
+            StopCoroutine(OnHit());
+
+        if (GetComponent<SpriteRenderer>().color.g <= 0)
+            isHit = false;
+
+        yield return new WaitForSeconds(0.02f);
+        StartCoroutine(OnHit());
+
+    }//происходит при получении урона персонажем
+
+    void Lose() {
+        main.GetComponent<Main>().Lose();
+    
+    }
+
+    private void OnTriggerEnter2D(Collider2D collision) 
+    {
+        if (collision.gameObject.tag == "Key") {
+            Destroy(collision.gameObject);
+            key = true;
+            soundEffector.PlayKeySound();
+
+        }
+
+        if (collision.gameObject.tag == "Door")
+        {
+            if (collision.gameObject.GetComponent<Door>().isOpen && canTP)
+            {
+                collision.gameObject.GetComponent<Door>().Teleport(gameObject);
+                canTP = false;
+                StartCoroutine(TPwait());
+            }
+            else if (key)
+                collision.gameObject.GetComponent<Door>().Unlock();
+        }
+
+        if (collision.gameObject.tag == "Coin")
+        {
+            Destroy(collision.gameObject);
+            coins++;
+            soundEffector.PlayCoinSound();
+            
+
+        }
+
+        if (collision.gameObject.tag == "Heart")
+        {
+            Destroy(collision.gameObject);
+            RecountHp(1);
+            soundEffector.PlayHeartSound();
+
+        }
+
+        if (collision.gameObject.tag == "Mushroom")
+        {
+            Destroy(collision.gameObject);
+            RecountHp(-1);
+
+
+        }
+//столкновения с разными объектами
+
+    }
+
+        IEnumerator TPwait() {
+
+            yield return new WaitForSeconds(2f);
+            canTP = true;
+
+
+    }
+
+    public int GetCoins() 
+    {
+        return coins;
+    }
+
+    public int GetHP()
+    {
+        return curHp;
+    }
+}
+
+Скрипт , связанный с камерой
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+public class Main : MonoBehaviour
+{
+    public Player player; //вспомогательная переменная
+    public Text coinText;
+    public Image[] hearts;
+    public Sprite isLife, nonLife;
+    public GameObject WinScreen;
+    public GameObject LoseScreen;
+    public GameObject PauseScreen;
+    public SoundEffector soundEffector;
+    public AudioSource musicSource, soundSource;
+
+
+
+    public void ReloadLvl() 
+    {
+        Time.timeScale = 1f;
+        player.enabled = true;
+        SceneManager.LoadScene(SceneManager.GetActiveScene().name);
+    }
+//перезапуск уровня
+
+    private void Start() 
+    {
+        musicSource.volume = (float)PlayerPrefs.GetInt("MusicVolume")/9;
+        soundSource.volume = (float)PlayerPrefs.GetInt("SoundVolume")/9;
+    }
+
+    public void Update() 
+    {
+        coinText.text = player.GetCoins().ToString();
+
+        for (int i = 0; i < hearts.Length; i++) 
+        {
+            if (player.GetHP() > i)
+            {
+                hearts[i].sprite = isLife;
+            }
+            else hearts[i].sprite = nonLife;
+        }
+    }
+//проверка монет и жизней
+
+    public void PauseOn() 
+    
+    {
+        Time.timeScale = 0f;
+        player.enabled = false;
+        PauseScreen.SetActive(true);
+
+    }
+
+    public void PauseOff()
+
+    {
+        Time.timeScale = 1f;
+        player.enabled = true;
+        PauseScreen.SetActive(false);
+
+    }
+
+    public void Win() {
+        soundEffector.PlayWinSound();
+        Time.timeScale = 0f;
+        player.enabled = false;
+        WinScreen.SetActive(true);
+
+        if ( PlayerPrefs.HasKey("Lvl") || PlayerPrefs.GetInt("Lvl") < SceneManager.GetActiveScene().buildIndex) 
+        {
+            PlayerPrefs.SetInt("Lvl", SceneManager.GetActiveScene().buildIndex);
+        }
+    
+    }
+
+    public void Lose()
+    {
+        soundEffector.PlayLoseSound();
+        Time.timeScale = 0f;
+        player.enabled = false;
+        LoseScreen.SetActive(true);
+
+    }
+
+    public void MenuLvl() 
+    {
+        Time.timeScale = 1f;
+        player.enabled = true;
+        SceneManager.LoadScene("Menu");
+    }
+
+    public void NextLvl() 
+    {
+        Time.timeScale = 1f;
+        player.enabled = true;
+        SceneManager.LoadScene(SceneManager.GetActiveScene().buildIndex + 1);
+    }
+
+
+}
+
+Скрипт для врагов
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Enemy : MonoBehaviour
+{
+    bool isHit = false;
+   private void OnCollisionEnter2D(Collision2D collision)
+    {
+        if (collision.gameObject.tag == "Player"&&!isHit) {
+            collision.gameObject.GetComponent<Player>().RecountHp(-1);
+            collision.gameObject.GetComponent<Rigidbody2D>().AddForce(transform.up * 4f, ForceMode2D.Impulse);
+        }
+//что происходит при столкновении с врагом
+
+
+    
+    }
+    public IEnumerator Death() {
+        isHit = true;
+        GetComponent<Animator>().SetBool("dead", true);
+        GetComponent<Rigidbody2D>().bodyType = RigidbodyType2D.Dynamic;
+        GetComponent<Collider2D>().enabled = false;
+        transform.GetChild(0).GetComponent<Collider2D>().enabled = false;
+        yield return new WaitForSeconds(2f);
+        Destroy(gameObject);
+    }
+//смерть персонажа
+    
+    public void startDeath()
+    {
+        StartCoroutine(Death());
+
+    }
+
+
+
+  
+}
+
+Скрипт для хождения врагов по платформам
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class groundTroll : MonoBehaviour
+{
+
+    public float speed = 1.5f;
+    public bool moveLeft = true;
+    public Transform groundDetect;
+    void Start()
+    {
+        
+    }
+    void Update()
+    {
+        transform.Translate(Vector2.left * speed * Time.deltaTime);
+        RaycastHit2D groundInfo = Physics2D.Raycast(groundDetect.position, Vector2.down, 1f);
+        if (groundInfo.collider == false) {
+            if (moveLeft == true)
+            {
+                transform.eulerAngles = new Vector3(0, 180, 0);
+                moveLeft = false;
+            }
+            else {
+                transform.eulerAngles = new Vector3(0, 0, 0);
+                moveLeft = true;
+
+            }
+        }
+        
+    }
+}
+
+
+Скрипт для плотоядного растения
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Plant : MonoBehaviour
+{
+    public float speed = 4f;
+    bool isWait = false;
+    bool isHidden = false;
+    public float waitTime = 4f;
+    public Transform point;
+
+
+    void Start()
+    {
+        point.transform.position = new Vector3(transform.position.x, transform.position.y + 1f, transform.position.z);
+    }
+
+    void Update()
+    {
+        if (isWait == false) transform.position =  Vector3.MoveTowards(transform.position, point.position, speed * Time.deltaTime);
+            if (transform.position == point.position)
+            {
+                if (isHidden)
+                {
+                    point.transform.position = new Vector3(transform.position.x, transform.position.y + 1f, transform.position.z);
+                    isHidden = false;
+                }
+                else
+                {
+                    point.transform.position = new Vector3(transform.position.x, transform.position.y - 1f, transform.position.z);
+                    isHidden = true;
+                }
+                isWait = true;
+                StartCoroutine(Waiting());
+            }
+        }
+        IEnumerator Waiting()
+        {
+            yield return new WaitForSeconds(waitTime);
+            isWait = false;
+
+        }
+//время ожидания
+
+    }
+
+
+Скрипт для полета птицы
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class AirPatrol : MonoBehaviour
+{
+    public Transform point1;
+    public Transform point2;
+    public float speed=2f;
+    void Start()
+    {
+        gameObject.transform.position = new Vector3(point1.position.x, point1.position.y, transform.position.z);
+    }
+
+    void Update()
+    {
+        transform.position = Vector3.MoveTowards(transform.position,point1.position,speed*Time.deltaTime);
+        if (transform.position==point1.position) {
+            Transform t = point1;
+            point1 = point2;
+            point2 = t;
+        
+        }
+        
+    }
+}
+
+
+Скрипт для дверей
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Door : MonoBehaviour
+{
+    public bool isOpen = false;
+    public Transform door;
+    public Sprite sprite;
+  
+    void Start()
+    {
+        
+    }
+
+  
+    void Update()
+    {
+        
+    }
+
+    public void Unlock() {
+        isOpen = true;
+        GetComponent<SpriteRenderer>().sprite = sprite;
+    
+    }
+
+    public void Teleport(GameObject player) {
+        player.transform.position = new Vector3(door.position.x,door.position.y,player.transform.position.z);
+    
+    }
+}
+
+
+
+Скрипт для кнопки
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Btn : MonoBehaviour
+{
+    public GameObject[] block;
+    public Sprite btnDown;
+
+    void Start()
+    {
+        
+    }
+
+    
+    void Update()
+    {
+        
+    }
+    private void OnCollisionEnter2D(Collision2D collision) {
+        if (collision.gameObject.tag == "MarkBox")
+        {
+            GetComponent<SpriteRenderer>().sprite = btnDown;
+            GetComponent<CircleCollider2D>().enabled = false;
+            foreach (GameObject obj in block) 
+            {
+                Destroy(obj);
+            
+            }
+        }
+    
+    }
+//уничтожение блоков при нажатии на кнопку
+}
+
+
+Скрипт для флага
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Flag : MonoBehaviour
+{
+    public Main main;
+    public Sprite finSprite;
+    private void OnTriggerEnter2D(Collider2D collision) 
+    {
+        if (collision.gameObject.tag == "Player") {
+            GetComponent<SpriteRenderer>().sprite = finSprite;
+            main.Win(); }
+    
+    }
+//завершение уровня
+}
+
+
+
+Скрипт для уничтожения растения
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class Destroyable : MonoBehaviour
+{
+    void Start()
+    {
+        
+    }
+
+    void Update()
+    {
+        
+    }
+
+    private void OnCollisionEnter2D(Collision2D collision) 
+    {
+        if (collision.gameObject.tag == "Player") 
+        {
+            collision.gameObject.GetComponent<Rigidbody2D>().AddForce(transform.up * 3f, ForceMode2D.Impulse);
+            gameObject.GetComponentInParent<Enemy>().startDeath();
+        }
+    
+    }
+}
+
+
+
+Скрипт для фона
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class BG : MonoBehaviour
+{
+    float length,startpos;
+    public GameObject cam;
+    public float parallaxEffect;
+
+
+    // Start is called before the first frame update
+    void Start()
+    {
+        startpos = transform.position.x;
+        length = GetComponent<SpriteRenderer>().bounds.size.x;
+    }
+
+    // Update is called once per frame
+    void Update()
+    {
+        float temp = cam.transform.position.x * (1 - parallaxEffect);
+        float dist = cam.transform.position.x * parallaxEffect;
+
+        transform.position = new Vector3(startpos+dist,transform.position.y, transform.position.z);
+
+        if (temp > startpos + length)  startpos += length;  
+        else if (temp < startpos - length) startpos -=length; 
+    }
+//плавность камеры
+}
+
+
+Скрипт для меню
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+public class Menu : MonoBehaviour
+{
+   
+    public Button[] lvls;
+    public Slider musicSlider, soundSlider;
+    void Start()
+    {
+        if (PlayerPrefs.HasKey("Lvl")) 
+        {
+            for (int i = 0; i < lvls.Length; i++) 
+            {
+                if (PlayerPrefs.GetInt("Lvl") >= i)
+                {
+                    lvls[i].interactable = true;
+                }
+                else { lvls[i].interactable = false; }
+            
+            }
+        }
+
+        if (!PlayerPrefs.HasKey("MusicVolume"))
+            PlayerPrefs.SetInt("MusicVolume",3);
+
+        if(!PlayerPrefs.HasKey("SoundVolume"))
+            PlayerPrefs.SetInt("SoundVolume",8);
+
+
+        musicSlider.value = PlayerPrefs.GetInt("MusicVolume");
+        soundSlider.value = PlayerPrefs.GetInt("SoundVolume");
+
+
+    }
+
+
+    void Update()
+    {
+        PlayerPrefs.SetInt("MusicVolume",(int)musicSlider.value);
+        PlayerPrefs.SetInt("SoundVolume", (int)soundSlider.value);
+    }
+
+    public void OpenScene(int index) 
+    {
+        SceneManager.LoadScene(index);
+    }
+
+    public void DelKeys() 
+    {
+        PlayerPrefs.DeleteAll();
+    }
+
+
+}
+
+
+
+
+Скрипт для звуков
+
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public class SoundEffector : MonoBehaviour
+{
+    public AudioSource audioSource;
+    public AudioClip jumpSound,coinSound,winSound,loseSound,heartSound,keySound;
+
+    public void PlayJumpSound() 
+    {
+        audioSource.PlayOneShot(jumpSound);
+    }
+
+    public void PlayLoseSound()
+    {
+        audioSource.PlayOneShot(loseSound);
+    }
+
+    public void PlayWinSound()
+    {
+        audioSource.PlayOneShot(winSound);
+    }
+
+    public void PlayCoinSound()
+    {
+        audioSource.PlayOneShot(coinSound);
+    }
+
+    public void PlayKeySound()
+    {
+        audioSource.PlayOneShot(keySound);
+    }
+
+    public void PlayHeartSound()
+    {
+        audioSource.PlayOneShot(heartSound);
+    }
+//проигрывание разных звуков
+
+}
